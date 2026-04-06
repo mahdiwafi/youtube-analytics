@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Channel Stats</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8 text-gray-800">
+    <div class="max-w-6xl mx-auto">
+        <h1 class="text-4xl font-bold text-center text-red-600 mb-8">YT Stat Tracker</h1>
+        
+        <div class="flex flex-col md:flex-row gap-4 justify-center mb-10">
+            <input type="text" id="searchInput1" placeholder="Channel 1 (Name, @handle, or URL)" class="px-4 py-2 border rounded shadow-sm w-full md:w-1/3">
+            <input type="text" id="searchInput2" placeholder="Channel 2 (Optional, for comparison)" class="px-4 py-2 border rounded shadow-sm w-full md:w-1/3">
+            <button onclick="fetchStats()" class="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 shadow-md font-semibold">Search / Compare</button>
+        </div>
+
+        <div id="error" class="hidden text-center text-red-500 mb-6 font-semibold"></div>
+        <div id="loading" class="hidden text-center text-gray-500 mb-6">Fetching data...</div>
+
+        <div id="results" class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div id="channel1" class="hidden flex-col gap-6"></div>
+            <div id="channel2" class="hidden flex-col gap-6"></div>
+        </div>
+    </div>
+
+    <script>
+        let charts = {};
+
+        async function fetchStats() {
+            const q1 = document.getElementById('searchInput1').value;
+            const q2 = document.getElementById('searchInput2').value;
+            const errorDiv = document.getElementById('error');
+            const loadingDiv = document.getElementById('loading');
+            const ch1Div = document.getElementById('channel1');
+            const ch2Div = document.getElementById('channel2');
+
+            if (!q1) {
+                errorDiv.textContent = "Please enter at least one channel to search.";
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            errorDiv.classList.add('hidden');
+            loadingDiv.classList.remove('hidden');
+            ch1Div.classList.add('hidden');
+            ch2Div.classList.add('hidden');
+
+            try {
+                const res1 = await fetch(`/api/channel-stats?q=${encodeURIComponent(q1)}`);
+                if (!res1.ok) throw new Error((await res1.json()).detail || "Error fetching Channel 1");
+                const data1 = await res1.json();
+                renderChannel(data1, ch1Div, 'chart1');
+                ch1Div.classList.remove('hidden');
+                
+                // Set layout based on comparison
+                ch1Div.parentElement.className = q2 ? "grid grid-cols-1 md:grid-cols-2 gap-8" : "grid grid-cols-1 max-w-3xl mx-auto";
+
+                if (q2) {
+                    const res2 = await fetch(`/api/channel-stats?q=${encodeURIComponent(q2)}`);
+                    if (!res2.ok) throw new Error((await res2.json()).detail || "Error fetching Channel 2");
+                    const data2 = await res2.json();
+                    renderChannel(data2, ch2Div, 'chart2');
+                    ch2Div.classList.remove('hidden');
+                }
+            } catch (err) {
+                errorDiv.textContent = err.message;
+                errorDiv.classList.remove('hidden');
+            } finally {
+                loadingDiv.classList.add('hidden');
+            }
+        }
+
+        function renderChannel(data, container, chartId) {
+            container.innerHTML = `
+                <div class="bg-white p-6 rounded-lg shadow-md flex items-center gap-6">
+                    <img src="${data.profile.avatar}" class="w-24 h-24 rounded-full border">
+                    <div>
+                        <h2 class="text-2xl font-bold">${data.profile.name}</h2>
+                        <p class="text-sm text-gray-500">Est. ${data.profile.created_at} • ${data.profile.country}</p>
+                        <p class="text-xs text-gray-400 mt-1">${data.profile.description}</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-white p-4 rounded-lg shadow-md text-center">
+                        <p class="text-gray-500 text-sm">Subscribers</p>
+                        <p class="text-xl font-bold">${data.stats.subscribers.toLocaleString()}</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow-md text-center">
+                        <p class="text-gray-500 text-sm">Total Views</p>
+                        <p class="text-xl font-bold">${data.stats.total_views.toLocaleString()}</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow-md text-center">
+                        <p class="text-gray-500 text-sm">30-Day Est. Earnings</p>
+                        <p class="text-xl font-bold text-green-600">$${data.earnings_30d.min.toLocaleString(undefined, {maximumFractionDigits:0})} - $${data.earnings_30d.max.toLocaleString(undefined, {maximumFractionDigits:0})}</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow-md text-center">
+                        <p class="text-gray-500 text-sm">Weekly Uploads</p>
+                        <p class="text-xl font-bold">${data.stats.upload_frequency_weekly}</p>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h3 class="font-bold mb-4">View Growth (Proxy based on recent 50 videos)</h3>
+                    <canvas id="${chartId}"></canvas>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h3 class="font-bold mb-4">Top Recent Videos</h3>
+                    <ul class="space-y-4">
+                        ${data.top_5_videos.map(v => `
+                            <li class="flex gap-4 items-center">
+                                <img src="${v.thumbnail}" class="w-24 rounded">
+                                <div>
+                                    <p class="font-semibold text-sm line-clamp-2">${v.title}</p>
+                                    <p class="text-xs text-gray-500">${v.views.toLocaleString()} views • ${v.date}</p>
+                                </div>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-md mt-6">
+                    <h3 class="font-bold mb-4">Recent 10 Uploads</h3>
+                    <ul class="space-y-4">
+                        ${data.recent_10_videos.map(v => `
+                            <li class="flex gap-4 items-center">
+                                <img src="${v.thumbnail}" class="w-16 rounded">
+                                <div>
+                                    <p class="font-semibold text-sm line-clamp-1">${v.title}</p>
+                                    <p class="text-xs text-gray-500">${v.views.toLocaleString()} views • ${v.date}</p>
+                                </div>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `;
+
+            if (charts[chartId]) charts[chartId].destroy();
+            
+            const ctx = document.getElementById(chartId).getContext('2d');
+            charts[chartId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.chart_data.labels,
+                    datasets: [{
+                        label: 'Cumulative Views (Recent)',
+                        data: data.chart_data.data,
+                        borderColor: 'rgb(220, 38, 38)',
+                        tension: 0.1
+                    }]
+                },
+                options: { plugins: { legend: { display: false } } }
+            });
+        }
+    </script>
+</body>
+</html>
